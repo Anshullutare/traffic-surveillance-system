@@ -1,0 +1,14 @@
+# Traffic Surveillance System — Python CV Dependencies
+# Install with: pip install -r requirements.txt
+
+# Computer Vision & Detection
+opencv-python>=4.8.0
+ultralytics>=8.0.0          # YOLOv8 (includes ByteTrack)
+
+# Real-time communication
+python-socketio[client]>=5.10.0
+python-engineio>=4.8.0
+websocket-client>=1.6.0
+
+# Numerical
+numpy>=1.24.0

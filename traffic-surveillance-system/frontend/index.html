@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Traffic Surveillance System</title>
+
+  <!-- Socket.IO client -->
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Chart.js date adapter -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+  <style>
+    /* ── Variables ─────────────────────────────────────────────── */
+    :root {
+      --bg:          #080c10;
+      --surface:     #0d1318;
+      --card:        #111820;
+      --border:      #1e2d3a;
+      --accent-teal: #00e5c8;
+      --accent-blue: #0094ff;
+      --accent-amber:#ffb300;
+      --accent-red:  #ff3d3d;
+      --accent-green:#00e676;
+      --text-1:      #e8eef4;
+      --text-2:      #7a97aa;
+      --font-mono:   'Courier New', Courier, monospace;
+    }
+
+    /* ── Reset ─────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Share+Tech+Mono&display=swap');
+
+    body {
+      background: var(--bg);
+      color: var(--text-1);
+      font-family: 'Rajdhani', 'Share Tech Mono', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Scanline overlay ──────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,229,200,.015) 2px,
+        rgba(0,229,200,.015) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── Header ────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 32px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, #080c10 0%, #0d1a24 100%);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo-icon {
+      width: 38px;
+      height: 38px;
+      border: 2px solid var(--accent-teal);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: pulse-border 3s ease infinite;
+    }
+
+    @keyframes pulse-border {
+      0%, 100% { border-color: var(--accent-teal); box-shadow: 0 0 0 0 rgba(0,229,200,.4); }
+      50%       { border-color: var(--accent-blue); box-shadow: 0 0 0 6px rgba(0,229,200,0); }
+    }
+
+    .logo-icon svg { color: var(--accent-teal); }
+
+    .logo-text h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--text-1);
+    }
+
+    .logo-text p {
+      font-size: .65rem;
+      letter-spacing: .2em;
+      color: var(--text-2);
+      text-transform: uppercase;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: .7rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      transition: all .3s;
+    }
+
+    .status-pill .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent-red);
+      animation: blink 1.4s ease infinite;
+    }
+
+    .status-pill.connected .dot { background: var(--accent-green); animation: none; }
+    .status-pill.connected { border-color: rgba(0,230,118,.3); }
+
+    @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+
+    #clock {
+      font-family: var(--font-mono);
+      font-size: .8rem;
+      color: var(--text-2);
+      letter-spacing: .1em;
+    }
+
+    /* ── Main layout ───────────────────────────────────────────── */
+    main {
+      padding: 28px 32px;
+      max-width: 1480px;
+      margin: 0 auto;
+    }
+
+    /* ── Section label ─────────────────────────────────────────── */
+    .section-label {
+      font-size: .65rem;
+      letter-spacing: .25em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Stat cards row ────────────────────────────────────────── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .3s;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(0,229,200,.04), transparent 60%);
+      pointer-events: none;
+    }
+
+    .stat-card:hover { border-color: rgba(0,229,200,.35); }
+
+    .stat-label {
+      font-size: .6rem;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      margin-bottom: 10px;
+    }
+
+    .stat-value {
+      font-size: 2.6rem;
+      font-weight: 700;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.02em;
+    }
+
+    .stat-value.teal  { color: var(--accent-teal); }
+    .stat-value.blue  { color: var(--accent-blue); }
+    .stat-value.amber { color: var(--accent-amber); }
+
+    .stat-sub {
+      font-size: .65rem;
+      color: var(--text-2);
+      margin-top: 6px;
+      letter-spacing: .08em;
+    }
+
+    /* ── Signal panel ──────────────────────────────────────────── */
+    .signal-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      transition: border-color .3s;
+    }
+
+    .traffic-light {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      background: #0a0f14;
+      border: 1px solid #1e2d3a;
+      border-radius: 8px;
+      padding: 10px 8px;
+    }
+
+    .light-bulb {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      transition: all .4s ease;
+    }
+
+    .light-bulb.red-bulb   { background: #2a0808; }
+    .light-bulb.green-bulb { background: #082a12; }
+
+    .light-bulb.active-red {
+      background: var(--accent-red);
+      box-shadow: 0 0 12px 4px rgba(255,61,61,.6);
+    }
+
+    .light-bulb.active-green {
+      background: var(--accent-green);
+      box-shadow: 0 0 12px 4px rgba(0,230,118,.6);
+    }
+
+    .signal-info .signal-state {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+    }
+
+    .signal-state.green { color: var(--accent-green); }
+    .signal-state.red   { color: var(--accent-red); }
+
+    .signal-lane-label {
+      font-size: .65rem;
+      letter-spacing: .18em;
+      color: var(--text-2);
+      text-transform: uppercase;
+    }
+
+    /* ── Middle row: signals + live bars ───────────────────────── */
+    .mid-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .lanes-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px;
+    }
+
+    .lane-bar-row {
+      margin-top: 16px;
+    }
+
+    .lane-bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: .7rem;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      margin-bottom: 7px;
+    }
+
+    .lane-bar-track {
+      height: 14px;
+      background: rgba(255,255,255,.05);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .lane-bar-fill {
+      height: 100%;
+      border-radius: 8px;
+      transition: width .6s cubic-bezier(.4,0,.2,1);
+      min-width: 4px;
+    }
+
+    .lane-bar-fill.l1 {
+      background: linear-gradient(90deg, var(--accent-teal), #00b5a0);
+    }
+
+    .lane-bar-fill.l2 {
+      background: linear-gradient(90deg, var(--accent-amber), #e67600);
+    }
+
+    /* ── Signals grid ───────────────────────────────────────────── */
+    .signals-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    /* ── Chart section ──────────────────────────────────────────── */
+    .chart-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px;
+      margin-bottom: 28px;
+    }
+
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .chart-title {
+      font-size: .7rem;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      color: var(--text-2);
+    }
+
+    .chart-legend {
+      display: flex;
+      gap: 18px;
+      font-size: .65rem;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-2);
+    }
+
+    .legend-dot {
+      width: 8px; height: 8px;
+      border-radius: 2px;
+    }
+
+    .chart-wrap { position: relative; height: 220px; }
+
+    /* ── History table ──────────────────────────────────────────── */
+    .table-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .table-header {
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .table-title {
+      font-size: .7rem;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      color: var(--text-2);
+    }
+
+    .record-count {
+      font-size: .65rem;
+      color: var(--accent-teal);
+      letter-spacing: .1em;
+    }
+
+    .table-scroll { max-height: 280px; overflow-y: auto; }
+
+    .table-scroll::-webkit-scrollbar { width: 4px; }
+    .table-scroll::-webkit-scrollbar-track { background: transparent; }
+    .table-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    thead th {
+      font-size: .58rem;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      padding: 10px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--card);
+    }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(30,45,58,.6);
+      transition: background .15s;
+      animation: row-in .3s ease forwards;
+    }
+
+    @keyframes row-in {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    tbody tr:hover { background: rgba(0,229,200,.04); }
+
+    tbody td {
+      font-size: .72rem;
+      padding: 9px 16px;
+      font-family: var(--font-mono);
+      color: var(--text-2);
+    }
+
+    tbody td.highlight { color: var(--text-1); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: .6rem;
+      letter-spacing: .1em;
+      font-weight: 600;
+    }
+
+    .badge-green { background: rgba(0,230,118,.15); color: var(--accent-green); }
+    .badge-red   { background: rgba(255,61,61,.15);  color: var(--accent-red); }
+
+    /* ── Responsive ─────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .stat-grid { grid-template-columns: 1fr 1fr; }
+      .mid-row   { grid-template-columns: 1fr; }
+      main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M2 12h20M12 2l8 10-8 10-8-10z"/>
+      </svg>
+    </div>
+    <div class="logo-text">
+      <h1>Traffic Surveillance</h1>
+      <p>Real-time monitoring system</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div id="statusPill" class="status-pill">
+      <span class="dot"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+    <div id="clock">--:--:--</div>
+  </div>
+</header>
+
+<!-- ── Main ───────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Stat Cards -->
+  <p class="section-label">Live Metrics</p>
+  <div class="stat-grid">
+    <div class="stat-card">
+      <p class="stat-label">Lane 1 — Vehicles</p>
+      <div class="stat-value teal" id="valLane1">—</div>
+      <p class="stat-sub">Cumulative count</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Lane 2 — Vehicles</p>
+      <div class="stat-value blue" id="valLane2">—</div>
+      <p class="stat-sub">Cumulative count</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Traffic Density</p>
+      <div class="stat-value amber" id="valDensity">—</div>
+      <p class="stat-sub">Weighted score</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Last Update</p>
+      <div style="font-size:1rem;margin-top:8px;color:var(--text-2);font-family:var(--font-mono)" id="valTime">—</div>
+      <p class="stat-sub">Server timestamp</p>
+    </div>
+  </div>
+
+  <!-- Mid row -->
+  <div class="mid-row">
+
+    <!-- Lane bars + signal indicators -->
+    <div class="lanes-card">
+      <p class="section-label" style="margin-bottom:0">Lane Activity</p>
+
+      <div class="lane-bar-row">
+        <div class="lane-bar-label">
+          <span style="color:var(--accent-teal)">Lane 1</span>
+          <span id="barLane1Val" style="color:var(--accent-teal)">0</span>
+        </div>
+        <div class="lane-bar-track">
+          <div class="lane-bar-fill l1" id="barLane1" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="lane-bar-row" style="margin-top:18px">
+        <div class="lane-bar-label">
+          <span style="color:var(--accent-amber)">Lane 2</span>
+          <span id="barLane2Val" style="color:var(--accent-amber)">0</span>
+        </div>
+        <div class="lane-bar-track">
+          <div class="lane-bar-fill l2" id="barLane2" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Traffic lights -->
+    <div class="lanes-card">
+      <p class="section-label" style="margin-bottom:0">Signal State</p>
+      <div class="signals-grid" style="margin-top:16px">
+
+        <!-- Lane 1 light -->
+        <div class="signal-card">
+          <div class="traffic-light">
+            <div class="light-bulb red-bulb"   id="l1Red"></div>
+            <div class="light-bulb green-bulb" id="l1Green"></div>
+          </div>
+          <div class="signal-info">
+            <div class="signal-lane-label">Lane 1</div>
+            <div class="signal-state" id="l1State">—</div>
+          </div>
+        </div>
+
+        <!-- Lane 2 light -->
+        <div class="signal-card">
+          <div class="traffic-light">
+            <div class="light-bulb red-bulb"   id="l2Red"></div>
+            <div class="light-bulb green-bulb" id="l2Green"></div>
+          </div>
+          <div class="signal-info">
+            <div class="signal-lane-label">Lane 2</div>
+            <div class="signal-state" id="l2State">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-card">
+    <div class="chart-header">
+      <span class="chart-title">Historical Traffic — Vehicle Count</span>
+      <div class="chart-legend">
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--accent-teal)"></div>
+          Lane 1
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--accent-amber)"></div>
+          Lane 2
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--accent-blue)"></div>
+          Density
+        </div>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="trafficChart"></canvas>
+    </div>
+  </div>
+
+  <!-- History table -->
+  <p class="section-label">Event Log</p>
+  <div class="table-card">
+    <div class="table-header">
+      <span class="table-title">Recent Records</span>
+      <span class="record-count" id="recordCount">0 records</span>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Lane 1</th>
+            <th>Lane 2</th>
+            <th>Density</th>
+            <th>Signal</th>
+          </tr>
+        </thead>
+        <tbody id="historyBody">
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Clock ────────────────────────────────────────────────────────────────────
+function updateClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-GB', { hour12: false });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── Chart Setup ──────────────────────────────────────────────────────────────
+const MAX_CHART_POINTS = 60;
+
+const chartData = {
+  labels: [],
+  datasets: [
+    {
+      label: 'Lane 1',
+      data: [],
+      borderColor: '#00e5c8',
+      backgroundColor: 'rgba(0,229,200,.08)',
+      borderWidth: 2,
+      pointRadius: 2,
+      tension: 0.4,
+      fill: true,
+    },
+    {
+      label: 'Lane 2',
+      data: [],
+      borderColor: '#ffb300',
+      backgroundColor: 'rgba(255,179,0,.08)',
+      borderWidth: 2,
+      pointRadius: 2,
+      tension: 0.4,
+      fill: true,
+    },
+    {
+      label: 'Density',
+      data: [],
+      borderColor: '#0094ff',
+      backgroundColor: 'rgba(0,148,255,.06)',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      borderDash: [4, 3],
+      tension: 0.4,
+      fill: false,
+    },
+  ],
+};
+
+const chart = new Chart(document.getElementById('trafficChart'), {
+  type: 'line',
+  data: chartData,
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#0d1318',
+        borderColor: '#1e2d3a',
+        borderWidth: 1,
+        titleColor: '#7a97aa',
+        bodyColor: '#e8eef4',
+        titleFont: { family: "'Courier New', monospace", size: 11 },
+        bodyFont:  { family: "'Courier New', monospace", size: 11 },
+      },
+    },
+    scales: {
+      x: {
+        ticks: { color: '#3a5568', font: { size: 10, family: "'Courier New'" }, maxTicksLimit: 10 },
+        grid:  { color: 'rgba(30,45,58,.6)' },
+      },
+      y: {
+        ticks: { color: '#3a5568', font: { size: 10, family: "'Courier New'" } },
+        grid:  { color: 'rgba(30,45,58,.6)' },
+        beginAtZero: true,
+      },
+    },
+  },
+});
+
+function pushToChart(lane1, lane2, density, ts) {
+  const label = new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
+  chartData.labels.push(label);
+  chartData.datasets[0].data.push(lane1);
+  chartData.datasets[1].data.push(lane2);
+  chartData.datasets[2].data.push(density);
+
+  if (chartData.labels.length > MAX_CHART_POINTS) {
+    chartData.labels.shift();
+    chartData.datasets.forEach(d => d.data.shift());
+  }
+  chart.update('none');
+}
+
+// ── Table ─────────────────────────────────────────────────────────────────────
+const MAX_ROWS = 80;
+let rowCount   = 0;
+
+function prependRow({ lane1, lane2, density, signal, timestamp }) {
+  const tbody = document.getElementById('historyBody');
+  const ts    = new Date(timestamp).toLocaleTimeString('en-GB', { hour12: false });
+  const isGreenL1 = signal === 'GREEN_LANE1';
+
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td class="highlight">${ts}</td>
+    <td>${lane1}</td>
+    <td>${lane2}</td>
+    <td>${(+density).toFixed(2)}</td>
+    <td>
+      <span class="badge ${isGreenL1 ? 'badge-green' : 'badge-red'}">
+        ${isGreenL1 ? '▶ L1 GREEN' : '▶ L2 GREEN'}
+      </span>
+    </td>
+  `;
+
+  tbody.insertBefore(tr, tbody.firstChild);
+  rowCount++;
+  document.getElementById('recordCount').textContent = `${rowCount} records`;
+
+  // Trim old rows
+  while (tbody.rows.length > MAX_ROWS) {
+    tbody.deleteRow(tbody.rows.length - 1);
+  }
+}
+
+// ── Signal lights ─────────────────────────────────────────────────────────────
+function updateSignals(signal) {
+  const l1Green = signal === 'GREEN_LANE1';
+
+  // Lane 1
+  document.getElementById('l1Red').className   = 'light-bulb red-bulb'   + (l1Green ? '' : ' active-red');
+  document.getElementById('l1Green').className = 'light-bulb green-bulb' + (l1Green ? ' active-green' : '');
+  const l1StateEl = document.getElementById('l1State');
+  l1StateEl.textContent = l1Green ? 'GREEN' : 'RED';
+  l1StateEl.className   = 'signal-state ' + (l1Green ? 'green' : 'red');
+
+  // Lane 2
+  document.getElementById('l2Red').className   = 'light-bulb red-bulb'   + (l1Green ? ' active-red' : '');
+  document.getElementById('l2Green').className = 'light-bulb green-bulb' + (l1Green ? '' : ' active-green');
+  const l2StateEl = document.getElementById('l2State');
+  l2StateEl.textContent = l1Green ? 'RED' : 'GREEN';
+  l2StateEl.className   = 'signal-state ' + (l1Green ? 'red' : 'green');
+}
+
+// ── Lane bars ─────────────────────────────────────────────────────────────────
+let maxLaneVal = 1;
+
+function updateBars(lane1, lane2) {
+  maxLaneVal = Math.max(maxLaneVal, lane1, lane2, 1);
+  const p1 = ((lane1 / maxLaneVal) * 100).toFixed(1);
+  const p2 = ((lane2 / maxLaneVal) * 100).toFixed(1);
+  document.getElementById('barLane1').style.width = p1 + '%';
+  document.getElementById('barLane2').style.width = p2 + '%';
+  document.getElementById('barLane1Val').textContent = lane1;
+  document.getElementById('barLane2Val').textContent = lane2;
+}
+
+// ── Handle incoming data ──────────────────────────────────────────────────────
+function handleData(data) {
+  const { lane1, lane2, density, signal, timestamp } = data;
+
+  document.getElementById('valLane1').textContent   = lane1;
+  document.getElementById('valLane2').textContent   = lane2;
+  document.getElementById('valDensity').textContent = (+density).toFixed(2);
+  document.getElementById('valTime').textContent    =
+    new Date(timestamp).toLocaleTimeString('en-GB', { hour12: false });
+
+  updateBars(lane1, lane2);
+  updateSignals(signal);
+  pushToChart(lane1, lane2, density, timestamp);
+  prependRow(data);
+}
+
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
+const socket = io('http://localhost:3000', { transports: ['websocket'] });
+
+socket.on('connect', () => {
+  const pill = document.getElementById('statusPill');
+  pill.classList.add('connected');
+  document.getElementById('statusText').textContent = 'Connected';
+  console.log('[Socket.IO] Connected ✓');
+});
+
+socket.on('disconnect', () => {
+  const pill = document.getElementById('statusPill');
+  pill.classList.remove('connected');
+  document.getElementById('statusText').textContent = 'Disconnected';
+});
+
+// Live update from Python CV
+socket.on('update-dashboard', handleData);
+
+// Populate chart + table from DB history on first connect
+socket.on('history-snapshot', (records) => {
+  records.forEach(r => {
+    pushToChart(r.lane1, r.lane2, r.density, r.timestamp);
+    prependRow(r);
+  });
+  console.log(`[History] Loaded ${records.length} past records`);
+});
+
+// ── Fetch HTTP history on load (fallback) ─────────────────────────────────────
+fetch('http://localhost:3000/history')
+  .then(r => r.json())
+  .then(({ data }) => {
+    if (!data || !data.length) return;
+    // Only populate chart (table already handled via snapshot)
+    data.forEach(r => pushToChart(r.lane1, r.lane2, r.density, r.timestamp));
+  })
+  .catch(() => {});
+</script>
+</body>
+</html>
